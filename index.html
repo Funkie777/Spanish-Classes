@@ -227,36 +227,42 @@
         ];
 
         let currentlyPlaying = null;
-        const audioCache = {};
+        let audioContext = null;
+        let audioBuffers = {};
 
-        function preloadAudio(src) {
-            if (!audioCache[src]) {
-                audioCache[src] = new Audio(src);
-                audioCache[src].load();
+        // Initialize AudioContext on first user interaction
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
-            return audioCache[src];
+            return audioContext;
         }
 
-        function playAudio(src) {
-            return new Promise((resolve, reject) => {
-                const audio = preloadAudio(src);
-                
-                audio.onended = () => {
+        // Load and decode audio file
+        async function loadAudio(url) {
+            if (audioBuffers[url]) {
+                return audioBuffers[url];
+            }
+
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const ctx = initAudioContext();
+            const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+            audioBuffers[url] = audioBuffer;
+            return audioBuffer;
+        }
+
+        // Play audio buffer
+        function playBuffer(buffer) {
+            return new Promise((resolve) => {
+                const ctx = initAudioContext();
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(ctx.destination);
+                source.onended = () => {
                     setTimeout(resolve, 1500);
                 };
-                
-                audio.onerror = (e) => {
-                    console.error('Failed to load:', src, e);
-                    reject(e);
-                };
-                
-                const playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(e => {
-                        console.error('Play failed:', src, e);
-                        reject(e);
-                    });
-                }
+                source.start(0);
             });
         }
 
@@ -267,11 +273,15 @@
             card.classList.add('playing');
             
             try {
-                await playAudio(`audio/${phrase.id}-en.mp3`);
+                // Play English
+                const enBuffer = await loadAudio(`audio/${phrase.id}-en.mp3`);
+                await playBuffer(enBuffer);
                 
+                // Play Spanish chunks 3 times
                 for (let repeat = 0; repeat < 3; repeat++) {
                     for (let i = 0; i < phrase.chunks; i++) {
-                        await playAudio(`audio/${phrase.id}-es-${i}.mp3`);
+                        const esBuffer = await loadAudio(`audio/${phrase.id}-es-${i}.mp3`);
+                        await playBuffer(esBuffer);
                     }
                     if (repeat < 2) {
                         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -284,13 +294,6 @@
             card.classList.remove('playing');
             currentlyPlaying = null;
         }
-
-        phrases.forEach(phrase => {
-            preloadAudio(`audio/${phrase.id}-en.mp3`);
-            for (let i = 0; i < phrase.chunks; i++) {
-                preloadAudio(`audio/${phrase.id}-es-${i}.mp3`);
-            }
-        });
 
         function createCard(phrase) {
             const card = document.createElement('div');
