@@ -227,18 +227,36 @@
         ];
 
         let currentlyPlaying = null;
+        const audioCache = {};
+
+        function preloadAudio(src) {
+            if (!audioCache[src]) {
+                audioCache[src] = new Audio(src);
+                audioCache[src].load();
+            }
+            return audioCache[src];
+        }
 
         function playAudio(src) {
-            return new Promise((resolve) => {
-                const audio = new Audio(src);
+            return new Promise((resolve, reject) => {
+                const audio = preloadAudio(src);
+                
                 audio.onended = () => {
                     setTimeout(resolve, 1500);
                 };
-                audio.onerror = () => {
-                    console.error('Failed to load:', src);
-                    resolve();
+                
+                audio.onerror = (e) => {
+                    console.error('Failed to load:', src, e);
+                    reject(e);
                 };
-                audio.play();
+                
+                const playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(e => {
+                        console.error('Play failed:', src, e);
+                        reject(e);
+                    });
+                }
             });
         }
 
@@ -248,20 +266,31 @@
             currentlyPlaying = card;
             card.classList.add('playing');
             
-            await playAudio(`audio/${phrase.id}-en.mp3`);
-            
-            for (let repeat = 0; repeat < 3; repeat++) {
-                for (let i = 0; i < phrase.chunks; i++) {
-                    await playAudio(`audio/${phrase.id}-es-${i}.mp3`);
+            try {
+                await playAudio(`audio/${phrase.id}-en.mp3`);
+                
+                for (let repeat = 0; repeat < 3; repeat++) {
+                    for (let i = 0; i < phrase.chunks; i++) {
+                        await playAudio(`audio/${phrase.id}-es-${i}.mp3`);
+                    }
+                    if (repeat < 2) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
                 }
-                if (repeat < 2) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
+            } catch (e) {
+                console.error('Playback error:', e);
             }
             
             card.classList.remove('playing');
             currentlyPlaying = null;
         }
+
+        phrases.forEach(phrase => {
+            preloadAudio(`audio/${phrase.id}-en.mp3`);
+            for (let i = 0; i < phrase.chunks; i++) {
+                preloadAudio(`audio/${phrase.id}-es-${i}.mp3`);
+            }
+        });
 
         function createCard(phrase) {
             const card = document.createElement('div');
